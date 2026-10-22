@@ -263,6 +263,14 @@ class WorkflowNode(BaseModel):
     # day a relay becomes a direct provider call, this document is unchanged.
     connector: Optional[str] = None
     action: Optional[str] = None
+    # action only: WHICH of this merchant's doors on ``connector`` the action
+    # runs through, by the door's own id (crm_connector_installation.id, the
+    # 060 primary key). Absent -> the connector's newest usable door (an
+    # action node names a connector, not a transport; the id is the single
+    # exception: a merchant can hold two base_urls on the SAME merchant_http
+    # connector, and this is how a plan says which one. Validated at publish:
+    # the id must be a usable door OF THIS MERCHANT under ``connector``.
+    installation_id: Optional[str] = None
     # action: the action's OWN arguments, validated at publish against the
     # model the connector declares for it. Values may be "{placeholder}" and
     # are resolved from the run's facts at fire time.

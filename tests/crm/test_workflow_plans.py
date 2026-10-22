@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 import app.crm.outreach.plans as plans
+from app.crm.connectivity.schemas.connector import ConnectorInstallation
 from app.crm.connectivity.schemas.template import TemplateVerdict
 from app.crm.outreach.db import DbTxn
 from app.crm.outreach.plans import validate_definition
@@ -581,6 +582,77 @@ async def test_publish_holds_the_templates_it_sends_before_asking_the_registry(
     expected = WorkflowDefinition.model_validate(_SEND_PLAN).send_templates()
     assert expected and accessor.locked == [expected]
     assert accessor.order == ["lock", "ask", "publish"]
+
+
+# --- rollout: an action node may pin WHICH door (installation_id) ---
+
+_INSTALL_PLAN: Dict[str, Any] = {
+    "entry": {"topic": "checkouts/update", "reenter": True, "cooldown_hours": 0},
+    "nodes": [
+        {"id": "wait-30m", "type": "wait", "minutes": 30},
+        {
+            "id": "hit-credit-line",
+            "type": "action",
+            "connector": "merchant_http",
+            "action": "request",
+            "installation_id": "inst-9001",
+            "args": {"path": "/credit-line/link", "body": {"customer_id": "FK1"}},
+        },
+    ],
+    "edges": [["wait-30m", "hit-credit-line"]],
+    "goal": {"topics": ["orders/create"]},
+    "purpose_key": "sales.credit_line.link",
+}
+
+
+@pytest.mark.asyncio
+async def test_publish_refuses_an_action_node_whose_pinned_door_resolves_to_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The publish-time half of door pinning: a plan that names a door must
+    name a door OF THIS MERCHANT under that connector that is still usable —
+    otherwise the first sign is a parked run hours later."""
+    accessor = _PublishAccessor(_INSTALL_PLAN)
+    patch_accessors(monkeypatch, plans, accessor)
+
+    async def no_door(
+        merchant_id: str, connector_key: str, installation_id: Optional[str] = None
+    ) -> None:
+        return None
+
+    monkeypatch.setattr(plans, "get_installation_for_connector", no_door)
+    with pytest.raises(plans.WorkflowValidationError) as refused:
+        await _publish(accessor)
+    assert refused.value.problems == [
+        "action node hit-credit-line: installation_id inst-9001 names no usable "
+        "door of this merchant on connector 'merchant_http'"
+    ]
+    assert accessor.published is False
+
+
+@pytest.mark.asyncio
+async def test_publish_proceeds_when_the_pinned_door_resolves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    accessor = _PublishAccessor(_INSTALL_PLAN)
+    patch_accessors(monkeypatch, plans, accessor)
+
+    async def one_door(
+        merchant_id: str, connector_key: str, installation_id: Optional[str] = None
+    ) -> ConnectorInstallation:
+        return ConnectorInstallation(
+            id="inst-9001",
+            merchant_id="m1",
+            connector_key="merchant_http",
+            external_account_id="https://api.example.com/v1",
+            display_label="Credit line API",
+            credential_id="cred-1",
+            status="healthy",
+        )
+
+    monkeypatch.setattr(plans, "get_installation_for_connector", one_door)
+    published = await _publish(accessor)
+    assert accessor.published is True and published.status == "live"
 
 
 # --- rollout phase 15: entry as a list of doors, and $topic on wait_event ---

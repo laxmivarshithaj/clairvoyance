@@ -91,23 +91,51 @@ def installation_by_account_query(
 
 
 def installation_for_connector_query(
-    merchant_id: str, connector_key: str
+    merchant_id: str, connector_key: str, installation_id: Optional[str] = None
 ) -> Tuple[str, List[Any]]:
     """The route shape, found by the CONNECTOR alone — the door an action
     acts through.
 
     Neither of the lookups above fits: an action node names a connector
-    ("shopify"), not our installation id and not the provider's account id,
+    ("shopify"), not an installation id and not the provider's account id,
     because a plan document must not have to know either. One merchant CAN
     hold two accounts on one connector (two shops, two WABAs — that is what
-    the account unique index allows), so this takes the newest usable one and
-    is deliberately not the way a multi-shop merchant will address a specific
-    shop; that day the node names the account and this gains a parameter.
+    the account unique index allows), so without more it takes the newest
+    usable one.
+
+    ``installation_id`` (crm_connector_installation.id, the 060 primary key)
+    pins the door when a plan names one. That is how a merchant with two
+    base_urls on the SAME merchant_http connector says which door an action
+    acts through — the one case a plan document DOES name the account, as
+    this function's docstring long promised ("the node names the account and
+    this gains a parameter"). Still merchant-scoped and still connector-bound:
+    the id is only meaningful inside ``merchant_id`` AND ``connector_key``,
+    so a leaked id from another tenant, or a merchant_http node pointing at a
+    whatsapp door, selects nothing rather than the wrong door.
 
     Usable only, bound as a parameter: fail closed on 'connecting',
     'degraded', 'revoked' and 'disabled' alike — an action performed through
-    an unproven or withdrawn door is a write we cannot stand behind.
+    an unproven or withdrawn door is a write we cannot stand behind. When the
+    id pins the door there is no ordering to do — the primary key is unique —
+    so no ORDER BY.
     """
+    if installation_id is not None:
+        query = f"""
+            SELECT {INSTALLATION_COLUMNS}
+              FROM {INSTALLATION_TABLE}
+             WHERE merchant_id = $1
+               AND connector_key = $2
+               AND id = $3::uuid
+               AND status = ANY($4::text[])
+             LIMIT 1
+        """
+        return query, [
+            merchant_id,
+            connector_key,
+            installation_id,
+            sorted(INSTALLATION_USABLE),
+        ]
+
     query = f"""
         SELECT {INSTALLATION_COLUMNS}
           FROM {INSTALLATION_TABLE}

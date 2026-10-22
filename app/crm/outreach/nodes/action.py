@@ -146,6 +146,9 @@ async def execute(
             # learned to read a fact from here would couple a provider to
             # this module's context shape.
             {"run_id": str(run.id), "node_id": node.id},
+            # Which door, when this merchant holds several base_urls on the
+            # connector (merchant_http). Absent -> the newest usable door.
+            node.installation_id,
         )
     except ActionError as e:
         raise NodeParked(f"action node {node.id}: {e}") from e
