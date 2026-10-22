@@ -104,15 +104,22 @@ async def revoke_installation(
 
 
 async def get_installation_for_connector(
-    merchant_id: str, connector_key: str
+    merchant_id: str, connector_key: str, installation_id: Optional[str] = None
 ) -> Optional[ConnectorInstallation]:
     """The usable door this merchant acts through on one connector, or None.
 
+    ``installation_id`` pins the door when a plan names one (a merchant can
+    hold several base_urls on merchant_http); absent it, the connector's
+    newest usable door is chosen.
+
     None is the fail-closed answer the action root turns into a refusal: no
-    connection, an unproven one, or a withdrawn one all read the same here,
-    because acting through any of them is the same mistake.
+    connection, an unproven one, a withdrawn one, or a named door that is not
+    this merchant's under this connector all read the same here, because
+    acting through any of them is the same mistake.
     """
-    query, values = installation_for_connector_query(merchant_id, connector_key)
+    query, values = installation_for_connector_query(
+        merchant_id, connector_key, installation_id=installation_id
+    )
     async with crm_connection() as conn:
         row = await conn.fetchrow(query, *values)
     return decode_installation(row) if row is not None else None

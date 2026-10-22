@@ -8,7 +8,7 @@ refusal from the destination) parks; a BAD MOMENT (timeout, 5xx, 429) leaves
 as itself so the walker's lease ladder re-sends it."""
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 import pytest
@@ -130,6 +130,7 @@ def _install(monkeypatch: pytest.MonkeyPatch, calls: List[Dict[str, Any]], **kw:
         action: str,
         args: Dict[str, Any],
         context: Dict[str, Any],
+        installation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         calls.append(
             {
@@ -138,6 +139,7 @@ def _install(monkeypatch: pytest.MonkeyPatch, calls: List[Dict[str, Any]], **kw:
                 "action": action,
                 "args": args,
                 "context": context,
+                "installation_id": installation_id,
             }
         )
         if "raises" in kw:
@@ -178,8 +180,29 @@ async def test_the_args_reach_the_connector_with_placeholders_resolved(
             # provider reading data from here would be reading outreach's
             # context shape from inside connectivity.
             "context": {"run_id": str(run.id), "node_id": "tag-vip"},
+            "installation_id": None,
         }
     ]
+
+
+async def test_a_node_that_names_a_door_carries_its_id_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one piece of transport an action node may name: when a merchant
+    holds several base_urls on merchant_http, WHICH door is a plan's call, so
+    the id must reach the connector untouched (connectivity validates it)."""
+    calls: List[Dict[str, Any]] = []
+    _install(monkeypatch, calls)
+    run = _run({"id": "1"})
+
+    await execute_action(
+        run,
+        _node(connector="merchant_http", action="request", installation_id="inst-9012"),
+        _DEFINITION,
+    )
+
+    assert calls[0]["connector"] == "merchant_http"
+    assert calls[0]["installation_id"] == "inst-9012"
 
 
 async def test_the_marker_is_bookkeeping_and_never_a_template_variable(
